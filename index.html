@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AngelaImut - API Playground</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --text: #f8fafc;
+            --primary: #38bdf8;
+            --accent: #818cf8;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            width: 100%;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .card {
+            background: var(--card);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        h2 { color: var(--primary); margin-top: 0; }
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        select, input, button {
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #334155;
+            background: #0f172a;
+            color: white;
+            font-size: 16px;
+        }
+        button {
+            background: var(--primary);
+            color: #0f172a;
+            font-weight: bold;
+            cursor: pointer;
+            border: none;
+            transition: 0.3s;
+        }
+        button:hover { opacity: 0.8; transform: translateY(-2px); }
+        pre {
+            background: #000;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            border-left: 4px solid var(--accent);
+            font-size: 14px;
+        }
+        .endpoint-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }
+        .badge {
+            background: #334155;
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>🚀 AngelaImut API Gateway</h1>
+        <p>Dokumentasi & Uji Coba API AI Scraper</p>
+    </header>
+
+    <div class="card">
+        <h2>Uji Coba API</h2>
+        <div class="input-group">
+            <label>Pilih Model:</label>
+            <select id="modelSelect">
+                <option value="powerbrain">PowerBrain (AI)</option>
+                <option value="grok">Grok (FathurWeb)</option>
+                <option value="qwen">Qwen (FathurWeb)</option>
+            </select>
+
+            <label>Prompt / Pertanyaan:</label>
+            <input type="text" id="promptInput" placeholder="Contoh: Apa itu Cloudflare?" value="Halo">
+            
+            <button onclick="testApi()">Kirim Request</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Daftar Endpoint Tersedia</h2>
+        <div class="endpoint-list" id="endpointList">
+            <div class="badge">/ai?model=powerbrain</div>
+            <div class="badge">/ai?model=grok</div>
+            <div class="badge">/ai?model=qwen</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Response</h2>
+        <pre id="jsonOutput">// Hasil akan muncul di sini...</pre>
+    </div>
+</div>
+
+<script>
+    async function testApi() {
+        const model = document.getElementById('modelSelect').value;
+        const prompt = document.getElementById('promptInput').value;
+        const output = document.getElementById('jsonOutput');
+
+        output.textContent = "Sedang memproses...";
+
+        try {
+            // Memanggil API lokal di folder /functions/ai.js
+            const response = await fetch(`/ai?q=${encodeURIComponent(prompt)}&model=${model}`);
+            const data = await response.json();
+            
+            output.textContent = JSON.stringify(data, null, 2);
+        } catch (error) {
+            output.textContent = "Error: " + error.message;
+        }
+    }
+</script>
+
+</body>
+</html>
