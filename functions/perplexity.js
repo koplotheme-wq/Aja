@@ -1,13 +1,7 @@
-// ==========================================
-// Author  : If you like content like this, you can join this channel. 📲
-// Contact : https://t.me/jieshuo_materials
-// ==========================================
-
 export async function onRequest(context) {
   const start = Date.now();
   const { request, env } = context;
   const url = new URL(request.url);
-  const author = env.AUTHOR || "AngelaImut";
   const headersResponse = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -17,10 +11,9 @@ export async function onRequest(context) {
   if (request.method === "OPTIONS") return new Response(null, { headers: headersResponse });
 
   const q = url.searchParams.get('q') || url.searchParams.get('text') || url.searchParams.get('query');
-  const model = "perplexity";
 
   if (!q) {
-    return new Response(JSON.stringify({ status: false, author, message: "Query q diperlukan" }), { status: 400, headers: headersResponse });
+    return new Response(JSON.stringify({ success: false, message: "Query q diperlukan" }), { status: 400, headers: headersResponse });
   }
 
   const targetUrl = 'https://labs.shannzx.xyz/api/v1/perplexity';
@@ -35,11 +28,10 @@ export async function onRequest(context) {
     });
 
     const data = await response.json();
-    // Mengambil nested data sesuai format JSON yang kamu lampirkan (data.data)
     const nestedData = data.data || data;
     
     let bestMatch = "";
-    const ignoreKeys = ['status', 'author', 'creator', 'message_id'];
+    const ignoreKeys = ['status', 'author', 'creator', 'message_id', 'success', 'timestamp', 'responsetime'];
     
     for (let key in nestedData) {
       let val = nestedData[key];
@@ -50,17 +42,17 @@ export async function onRequest(context) {
       }
     }
 
-    const runtime = `${((Date.now() - start) / 1000).toFixed(2)}s`;
+    // Hitung responseTime dalam milidetik (ms)
+    const responseTime = `${Date.now() - start}ms`;
     
     return new Response(JSON.stringify({
-      status: true,
-      author,
-      runtime,
-      model,
-      reply: bestMatch || nestedData.answer || nestedData.message || "Gagal parsing"
+      success: true,
+      result: bestMatch || nestedData.answer || nestedData.message || "Gagal parsing",
+      timestamp: new Date().toISOString(),
+      responseTime: responseTime
     }, null, 2), { status: 200, headers: headersResponse });
 
   } catch (e) {
-    return new Response(JSON.stringify({ status: false, author, error: e.message }), { status: 500, headers: headersResponse });
+    return new Response(JSON.stringify({ success: false, error: e.message }), { status: 500, headers: headersResponse });
   }
 }
