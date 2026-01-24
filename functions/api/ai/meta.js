@@ -1,15 +1,10 @@
 export async function onRequest(context) {
   const { request } = context;
   const url = new URL(request.url);
-
-  // --- PARAMETER INPUT ---
   const message = url.searchParams.get('message') || url.searchParams.get('q');
   const customPrompt = url.searchParams.get('prompt');
-  
-  // Parameter baru untuk memory
   const existingSessionId = url.searchParams.get('sessionId');
   const existingThreadId = url.searchParams.get('threadId');
-
   const jsonResponse = (data, status = 200) => {
     return new Response(JSON.stringify(data, null, 2), {
       status: status,
@@ -20,7 +15,6 @@ export async function onRequest(context) {
       }
     });
   };
-
   if (!message) {
     return jsonResponse({
       status: true,
@@ -29,11 +23,7 @@ export async function onRequest(context) {
       usage: `${url.origin}/?message=Halo&sessionId=ID_LAMA`
     });
   }
-
-  // --- SYSTEM PROMPT (YUNA) ---
   const SYSTEM_PROMPT = customPrompt || `You are Yuna, a gentle, feminine, anime-style virtual girl... (Persona Lengkap)`;
-
-  // --- HELPER FUNCTIONS (TETAP SAMA) ---
   function generateRandomDOB() {
     const year = Math.floor(Math.random() * (2005 - 1970 + 1)) + 1970;
     const month = String(Math.floor(Math.random() * 12) + 1).padStart(2, '0');
@@ -42,8 +32,6 @@ export async function onRequest(context) {
   }
   function generateUUID() { return crypto.randomUUID(); }
   function generateRandomId() { return Math.floor(Math.random() * 9e18).toString(); }
-
-  // --- 1. FUNGSI GET TOKEN (LOGIKA ASLI) ---
   async function getToken() {
     const form = new FormData();
     const params = {
@@ -79,8 +67,6 @@ export async function onRequest(context) {
     if (!authData) throw new Error("Gagal mendapatkan token.");
     return { access_token: authData.access_token };
   }
-
-  // --- 2. FUNGSI KIRIM PESAN (LOGIKA ASLI) ---
   async function sendMetaMessage(accessToken, msgText, isNewConv, conversationIds) {
     const { externalConversationId, threadSessionId } = conversationIds;
     const offlineThreadingId = generateRandomId();
@@ -96,9 +82,9 @@ export async function onRequest(context) {
       externalConversationId, offlineThreadingId, threadSessionId,
       isNewConversation: isNewConv, selectedModel: "BASIC_OPTION",
       messagePersistentInput: {
-          bot_message_offline_threading_id: (BigInt(offlineThreadingId) + 1n).toString(),
-          external_conversation_id: externalConversationId, is_new_conversation: isNewConv,
-          offline_threading_id: offlineThreadingId, prompt_session_id: threadSessionId
+        bot_message_offline_threading_id: (BigInt(offlineThreadingId) + 1n).toString(),
+        external_conversation_id: externalConversationId, is_new_conversation: isNewConv,
+        offline_threading_id: offlineThreadingId, prompt_session_id: threadSessionId
       },
       alakazam_enabled: true,
       __relay_internal__pv__alakazam_enabledrelayprovider: true,
@@ -106,57 +92,3 @@ export async function onRequest(context) {
       __relay_internal__pv__KadabraNewCitationsEnabledrelayprovider: true
     }));
     const response = await fetch('https://graph.meta.ai/graphql?locale=user', {
-      method: 'POST',
-      headers: { 'referer': 'https://www.meta.ai/', 'cookie': 'datr=sU90afPSYelxqmSaKqer58Hc' },
-      body: form
-    });
-    return await response.text();
-  }
-
-  try {
-    const tokenData = await getToken();
-    
-    // TENTUKAN ID: Pakai yang lama atau buat baru
-    const conversationIds = {
-      externalConversationId: existingSessionId || generateUUID(),
-      threadSessionId: existingThreadId || generateUUID()
-    };
-
-    // Jika sessionId belum ada, berarti ini chat baru -> Kirim Persona dulu
-    if (!existingSessionId) {
-      await sendMetaMessage(tokenData.access_token, SYSTEM_PROMPT, true, conversationIds);
-    }
-    
-    // Kirim Pesan User
-    const rawResponse = await sendMetaMessage(tokenData.access_token, message, false, conversationIds);
-
-    const lines = rawResponse.split('\n').filter(line => line.trim());
-    const parsedData = lines.map(line => {
-      try { return JSON.parse(line); } catch { return null; }
-    }).filter(Boolean);
-
-    let finalResult = null;
-    for (let i = parsedData.length - 1; i >= 0; i--) {
-      const item = parsedData[i];
-      const node = item?.data?.node?.bot_response_message;
-      if (node?.content?.text || item?.extensions?.is_final) {
-        finalResult = node?.content?.text?.composed_text?.content?.[0]?.text || node?.snippet;
-        break;
-      }
-    }
-
-    return jsonResponse({
-      status: true,
-      author: "AngelaImut",
-      persona: "Yuna",
-      result: finalResult || "Yuna lagi bingung nih...",
-      session: {
-        sessionId: conversationIds.externalConversationId,
-        threadId: conversationIds.threadSessionId
-      }
-    });
-
-  } catch (error) {
-    return jsonResponse({ status: false, author: "AngelaImut", error: error.message }, 500);
-  }
-}
