@@ -15,7 +15,7 @@ export async function onRequest(context) {
 
   if (request.method === "OPTIONS") return new Response(null, { headers: headersResponse });
 
-  // 1. Normalisasi Parameter (Anti Salah Ketik)
+  // 1. Normalisasi Parameter
   const params = {};
   for (const [key, value] of urlParams.searchParams.entries()) {
     params[key.toLowerCase()] = value;
@@ -23,11 +23,12 @@ export async function onRequest(context) {
 
   const q = params.q || params.text;
   const systemPrompt = params.system || params.prompt;
+  const manualToken = params.token || params.access_token; // Cek token bawaan
 
   if (!q) {
     return new Response(JSON.stringify({ 
       success: false, 
-      message: "Parameter 'q' atau 'text' diperlukan" 
+      message: "Parameter 'q' atau 'text' diperlukan. Gunakan &token=... jika ingin pakai token sendiri." 
     }), { status: 400, headers: headersResponse });
   }
 
@@ -38,44 +39,52 @@ export async function onRequest(context) {
   const genRandomId = () => Math.floor(Math.random() * 9e18).toString();
 
   try {
-    // 2. TAHAP AMBIL GUEST TOKEN
-    const tokenFormData = new FormData();
-    const commonFields = {
-      'av': '0', '__user': '0', '__a': '1', '__req': 't', 'dpr': '1', '__ccg': 'GOOD',
-      '__rev': '1032408219', 'lsd': 'AdJzP_b_qoc', 'jazoest': '21052', '__spin_r': '1032408219',
-      '__spin_b': 'trunk', '__spin_t': '1769230257'
-    };
-    Object.entries(commonFields).forEach(([k, v]) => tokenFormData.append(k, v));
-    tokenFormData.append('variables', JSON.stringify({
-      "dob": genDOB(),
-      "__relay_internal__pv__AbraQPDocUploadNuxTriggerNamerelayprovider": "meta_dot_ai_abra_web_doc_upload_nux_tour",
-      "__relay_internal__pv__AbraSurfaceNuxIDrelayprovider": "12177"
-    }));
-    tokenFormData.append('doc_id', '25102616396026783');
+    let accessToken = manualToken;
 
-    const tokenRes = await fetch('https://www.meta.ai/api/graphql/', {
-      method: 'POST',
-      body: tokenFormData,
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.meta.ai/' }
-    });
+    // 2. JIKA TOKEN TIDAK ADA, AMBIL OTOMATIS (DENGAN COOKIE)
+    if (!accessToken) {
+      const tokenFormData = new FormData();
+      const authFields = {
+        'av': '0', '__user': '0', '__a': '1', '__req': 't', 'dpr': '1', '__ccg': 'GOOD',
+        '__rev': '1032408219', 'lsd': 'AdJzP_b_qoc', 'jazoest': '21052', '__spin_r': '1032408219',
+        '__spin_b': 'trunk', '__spin_t': '1769230257', 'doc_id': '25102616396026783'
+      };
+      Object.entries(authFields).forEach(([k, v]) => tokenFormData.append(k, v));
+      tokenFormData.append('variables', JSON.stringify({
+        "dob": genDOB(),
+        "__relay_internal__pv__AbraQPDocUploadNuxTriggerNamerelayprovider": "meta_dot_ai_abra_web_doc_upload_nux_tour",
+        "__relay_internal__pv__AbraSurfaceNuxIDrelayprovider": "12177"
+      }));
 
-    const rawTokenText = await tokenRes.text();
-    const tokenData = JSON.parse(cleanMetaJSON(rawTokenText));
-    const auth = tokenData.data?.xab_abra_accept_terms_of_service?.new_temp_user_auth;
-    
-    if (!auth) throw new Error("Gagal mendapatkan akses token Meta AI (TOS Denied)");
+      const tokenRes = await fetch('https://www.meta.ai/api/graphql/', {
+        method: 'POST',
+        body: tokenFormData,
+        headers: { 
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:147.0)',
+          'Referer': 'https://www.meta.ai/',
+          'Cookie': 'datr=sU90afPSYelxqmSaKqer58Hc; wd=1366x643' // Kunci agar tidak TOS Denied
+        }
+      });
+
+      const rawTokenText = await tokenRes.text();
+      const tokenData = JSON.parse(cleanMetaJSON(rawTokenText));
+      accessToken = tokenData.data?.xab_abra_accept_terms_of_service?.new_temp_user_auth?.access_token;
+      
+      if (!accessToken) throw new Error("Gagal auto-generate token. Harap masukkan &token= manual.");
+    }
 
     // 3. TAHAP KIRIM PESAN
     const extConvId = genUUID();
     const threadId = genUUID();
-    const accessToken = auth.access_token;
 
     const sendMessage = async (msg, isNew) => {
       const chatFormData = new FormData();
-      Object.entries(commonFields).forEach(([k, v]) => chatFormData.append(k, v));
-      chatFormData.append('access_token', accessToken);
-      chatFormData.append('fb_api_req_friendly_name', 'useKadabraSendMessageMutation');
-      chatFormData.append('doc_id', '24895882500088854');
+      const chatFields = {
+        'av': '0', '__user': '0', '__a': '1', '__req': 'v', 'dpr': '1', 'lsd': 'AdJzP_b_qoc',
+        'access_token': accessToken, 'fb_api_req_friendly_name': 'useKadabraSendMessageMutation',
+        'doc_id': '24895882500088854'
+      };
+      Object.entries(chatFields).forEach(([k, v]) => chatFormData.append(k, v));
       
       const offId = genRandomId();
       chatFormData.append('variables', JSON.stringify({
@@ -93,63 +102,51 @@ export async function onRequest(context) {
           prompt_session_id: threadId
         },
         alakazam_enabled: true,
-        __relay_internal__pv__alakazam_enabledrelayprovider: true,
         __relay_internal__pv__AbraSearchInlineReferencesEnabledrelayprovider: true,
-        __relay_internal__pv__KadabraNewCitationsEnabledrelayprovider: true,
-        __relay_internal__pv__WebPixelRatiorelayprovider: 1
+        __relay_internal__pv__KadabraNewCitationsEnabledrelayprovider: true
       }));
 
       return fetch('https://graph.meta.ai/graphql?locale=user', {
         method: 'POST',
-        body: chatFormData
+        body: chatFormData,
+        headers: { 'Origin': 'https://www.meta.ai', 'Referer': 'https://www.meta.ai/' }
       });
     };
 
     let finalRes;
     if (systemPrompt) {
       await sendMessage(systemPrompt, true);
-      await new Promise(r => setTimeout(r, 1000)); // Delay agar Meta tidak bingung
+      await new Promise(r => setTimeout(r, 800));
       finalRes = await sendMessage(q, false);
     } else {
       finalRes = await sendMessage(q, true);
     }
 
-    // 4. PARSING NDJSON STREAM DENGAN PEMBERSIH PREFIX
     const rawChatText = await finalRes.text();
-    const lines = rawChatText.split('\n')
-      .map(line => cleanMetaJSON(line))
-      .filter(l => l);
+    const lines = rawChatText.split('\n').map(l => cleanMetaJSON(l)).filter(l => l);
 
-    let lastDataNode = null;
+    let lastNode = null;
     for (let i = lines.length - 1; i >= 0; i--) {
       try {
         const parsed = JSON.parse(lines[i]);
         const node = parsed?.data?.node?.bot_response_message;
-        // Cari yang punya konten teks atau yang ditandai is_final
         if (node?.content?.text || parsed?.extensions?.is_final) {
-          lastDataNode = node;
+          lastNode = node;
           break;
         }
       } catch (e) {}
     }
 
-    if (!lastDataNode) throw new Error("Respon Meta AI kosong atau tidak valid");
-
-    const result = {
-      text: lastDataNode.content?.text?.composed_text?.content?.[0]?.text || lastDataNode.snippet,
-      sources: lastDataNode.citations?.map(c => c.url) || [],
-      reels: lastDataNode.content?.card?.reels_v2?.map(r => ({
-        title: r.title,
-        url: r.url,
-        thumb: r.image?.uri
-      })) || null
-    };
+    if (!lastNode) throw new Error("Respon Meta AI kosong. Token mungkin kadaluarsa.");
 
     const responseTime = `${Date.now() - start}ms`;
-
     return new Response(JSON.stringify({
       success: true,
-      result: result,
+      result: {
+        text: lastNode.content?.text?.composed_text?.content?.[0]?.text || lastNode.snippet,
+        sources: lastNode.citations?.map(c => c.url) || []
+      },
+      token_used: accessToken.substring(0, 10) + "...", // Info token yang dipakai
       timestamp: new Date().toISOString(),
       responseTime
     }, null, 2), { status: 200, headers: headersResponse });
