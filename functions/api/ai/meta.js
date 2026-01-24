@@ -15,7 +15,7 @@ export async function onRequest(context) {
 
   if (request.method === "OPTIONS") return new Response(null, { headers: headersResponse });
 
-  // Normalisasi Parameter
+  // 1. Normalisasi Parameter (Anti Salah Ketik)
   const params = {};
   for (const [key, value] of urlParams.searchParams.entries()) {
     params[key.toLowerCase()] = value;
@@ -31,19 +31,14 @@ export async function onRequest(context) {
     }), { status: 400, headers: headersResponse });
   }
 
-  // --- HELPER FUNCTIONS ---
-  const genDOB = () => {
-    const year = Math.floor(Math.random() * (2005 - 1970 + 1)) + 1970;
-    const month = String(Math.floor(Math.random() * 12) + 1).padStart(2, '0');
-    const day = String(Math.floor(Math.random() * 28) + 1).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
+  // --- HELPER INTERNAL ---
+  const cleanMetaJSON = (text) => text.replace(/^for\s*\(\s*;\s*;\s*\)\s*;\s*/, "").trim();
+  const genDOB = () => `19${Math.floor(Math.random() * 30 + 70)}-${String(Math.floor(Math.random() * 12) + 1).padStart(2, '0')}-${String(Math.floor(Math.random() * 28) + 1).padStart(2, '0')}`;
   const genUUID = () => crypto.randomUUID();
   const genRandomId = () => Math.floor(Math.random() * 9e18).toString();
 
   try {
-    // 1. GET GUEST TOKEN
+    // 2. TAHAP AMBIL GUEST TOKEN
     const tokenFormData = new FormData();
     const commonFields = {
       'av': '0', '__user': '0', '__a': '1', '__req': 't', 'dpr': '1', '__ccg': 'GOOD',
@@ -63,11 +58,14 @@ export async function onRequest(context) {
       body: tokenFormData,
       headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.meta.ai/' }
     });
-    const tokenData = await tokenRes.json();
-    const auth = tokenData.data?.xab_abra_accept_terms_of_service?.new_temp_user_auth;
-    if (!auth) throw new Error("Gagal mendapatkan akses token Meta AI");
 
-    // 2. SEND MESSAGE LOGIC
+    const rawTokenText = await tokenRes.text();
+    const tokenData = JSON.parse(cleanMetaJSON(rawTokenText));
+    const auth = tokenData.data?.xab_abra_accept_terms_of_service?.new_temp_user_auth;
+    
+    if (!auth) throw new Error("Gagal mendapatkan akses token Meta AI (TOS Denied)");
+
+    // 3. TAHAP KIRIM PESAN
     const extConvId = genUUID();
     const threadId = genUUID();
     const accessToken = auth.access_token;
@@ -97,7 +95,8 @@ export async function onRequest(context) {
         alakazam_enabled: true,
         __relay_internal__pv__alakazam_enabledrelayprovider: true,
         __relay_internal__pv__AbraSearchInlineReferencesEnabledrelayprovider: true,
-        __relay_internal__pv__KadabraNewCitationsEnabledrelayprovider: true
+        __relay_internal__pv__KadabraNewCitationsEnabledrelayprovider: true,
+        __relay_internal__pv__WebPixelRatiorelayprovider: 1
       }));
 
       return fetch('https://graph.meta.ai/graphql?locale=user', {
@@ -106,43 +105,43 @@ export async function onRequest(context) {
       });
     };
 
-    // Eksekusi (Jika ada system prompt, kirim dulu baru user message)
     let finalRes;
     if (systemPrompt) {
       await sendMessage(systemPrompt, true);
-      // Tunggu sebentar agar tidak tabrakan di backend Meta
-      await new Promise(r => setTimeout(r, 800));
+      await new Promise(r => setTimeout(r, 1000)); // Delay agar Meta tidak bingung
       finalRes = await sendMessage(q, false);
     } else {
       finalRes = await sendMessage(q, true);
     }
 
-    // 3. PARSING STREAM
-    const rawText = await finalRes.text();
-    const lines = rawText.split('\n').filter(l => l.trim());
-    let lastData = null;
+    // 4. PARSING NDJSON STREAM DENGAN PEMBERSIH PREFIX
+    const rawChatText = await finalRes.text();
+    const lines = rawChatText.split('\n')
+      .map(line => cleanMetaJSON(line))
+      .filter(l => l);
 
-    // Cari node bot_response_message terakhir yang valid
+    let lastDataNode = null;
     for (let i = lines.length - 1; i >= 0; i--) {
       try {
         const parsed = JSON.parse(lines[i]);
         const node = parsed?.data?.node?.bot_response_message;
+        // Cari yang punya konten teks atau yang ditandai is_final
         if (node?.content?.text || parsed?.extensions?.is_final) {
-          lastData = node;
+          lastDataNode = node;
           break;
         }
       } catch (e) {}
     }
 
-    if (!lastData) throw new Error("Gagal mengekstrak respon dari Meta AI");
+    if (!lastDataNode) throw new Error("Respon Meta AI kosong atau tidak valid");
 
     const result = {
-      text: lastData.content?.text?.composed_text?.content?.[0]?.text || lastData.snippet,
-      sources: lastData.citations?.map(c => c.url) || [],
-      reels: lastData.content?.card?.reels_v2?.map(r => ({
+      text: lastDataNode.content?.text?.composed_text?.content?.[0]?.text || lastDataNode.snippet,
+      sources: lastDataNode.citations?.map(c => c.url) || [],
+      reels: lastDataNode.content?.card?.reels_v2?.map(r => ({
         title: r.title,
         url: r.url,
-        video: r.videoDeliveryResponseResult?.progressive_urls?.find(v => v.metadata?.quality === "HD")?.progressive_url
+        thumb: r.image?.uri
       })) || null
     };
 
