@@ -10,7 +10,6 @@ export async function onRequest(context) {
 
   if (request.method === "OPTIONS") return new Response(null, { headers: headersResponse });
 
-  // Trik Anti Salah Ketik: Normalisasi parameter
   const params = {};
   for (const [key, value] of url.searchParams.entries()) {
     params[key.toLowerCase()] = value;
@@ -20,43 +19,23 @@ export async function onRequest(context) {
   const lang = params.lang || 'id';
 
   if (!text) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      message: "Parameter 'text' atau 'q' diperlukan" 
-    }), { status: 400, headers: headersResponse });
+    return new Response(JSON.stringify({ success: false, message: "Query q/text diperlukan" }), { status: 400, headers: headersResponse });
   }
 
   const BASE_URL = 'https://kube-appserver.simsimi.com:30443';
   const commonHeaders = {
     'accept': 'application/json, text/plain, */*',
-    'accept-encoding': 'gzip',
     'av': '9.1.2',
-    'content-type': 'application/json',
     'os': 'a',
-    'user-agent': 'okhttp/4.10.0'
+    'user-agent': 'okhttp/4.10.0',
+    'content-type': 'application/json',
+    'x-signature': '7aada6ad4e0a69a6049f26819d21464aa16f0f06fe9376de474af73c88e60afb'
   };
 
   try {
-    // 1. Validasi Bahasa (Sesuai logika skrip asli)
-    const lcRes = await fetch(`${BASE_URL}/setting/lc-list`, {
-      method: 'POST',
-      headers: commonHeaders,
-      body: JSON.stringify({ cc: 'TH' })
-    });
-    const lcData = await lcRes.json();
-    const isLangValid = lcData.some(l => l.lc === lang);
-
-    if (!isLangValid) {
-      throw new Error(`Bahasa '${lang}' tidak didukung.`);
-    }
-
-    // 2. Kirim Pesan Chat
     const chatRes = await fetch(`${BASE_URL}/simtalk/get_talk_set`, {
       method: 'POST',
-      headers: {
-        ...commonHeaders,
-        'x-signature': '7aada6ad4e0a69a6049f26819d21464aa16f0f06fe9376de474af73c88e60afb'
-      },
+      headers: commonHeaders,
       body: JSON.stringify({
         uid: 509027922,
         av: '9.1.2',
@@ -64,49 +43,48 @@ export async function onRequest(context) {
         lc: lang,
         cc: 'TH',
         tz: 'Asia/Bangkok',
-        cv: '',
         message: text,
         free_level: 4,
         logUID: '509027922',
         reg_now_days: 0
       })
+      // Timeout dihapus total sesuai permintaan. Kita tunggu sampai server menyerah.
     });
 
-    const data = await chatRes.json();
+    const responseTime = `${Date.now() - start}ms`;
+    const contentType = chatRes.headers.get("content-type") || "";
 
-    // Sesuai Aturan: Mencari string jawaban terpanjang sebagai result
-    const nestedData = data.sentence || data;
-    let bestMatch = "";
+    // JIKA RESPON ADALAH JSON
+    if (contentType.includes("application/json")) {
+      const data = await chatRes.json();
+      return new Response(JSON.stringify({
+        success: true,
+        result: data.sentence || data,
+        timestamp: new Date().toISOString(),
+        responseTime
+      }, null, 2), { status: 200, headers: headersResponse });
+    } 
     
-    if (typeof nestedData === 'string') {
-      bestMatch = nestedData;
-    } else {
-      const ignoreKeys = ['status', 'success', 'timestamp', 'responsetime', 'uid', 'loguid'];
-      for (let key in nestedData) {
-        let val = nestedData[key];
-        if (typeof val === 'string' && !ignoreKeys.includes(key.toLowerCase())) {
-          if (val.trim() !== text.trim() && val.length > bestMatch.length) {
-            bestMatch = val;
-          }
-        }
-      }
+    // JIKA RESPON ADALAH HTML ATAU TEKS (ERROR SERVER)
+    else {
+      const rawText = await chatRes.text();
+      return new Response(JSON.stringify({
+        success: false,
+        result: "Server mengirimkan HTML/Teks mentah (bukan JSON)",
+        raw_debug: rawText, // Kita tampilkan semua isi HTML-nya di sini
+        http_status: chatRes.status,
+        timestamp: new Date().toISOString(),
+        responseTime
+      }, null, 2), { status: chatRes.status, headers: headersResponse });
     }
 
-    const responseTime = `${Date.now() - start}ms`;
-
-    return new Response(JSON.stringify({
-      success: true,
-      result: bestMatch || data.sentence || "Simi tidak tahu harus jawab apa...",
-      timestamp: new Date().toISOString(),
-      responseTime: responseTime
-    }, null, 2), { status: 200, headers: headersResponse });
-
   } catch (e) {
+    const responseTime = `${Date.now() - start}ms`;
     return new Response(JSON.stringify({ 
       success: false, 
       error: e.message,
       timestamp: new Date().toISOString(),
-      responseTime: `${Date.now() - start}ms`
+      responseTime
     }), { status: 500, headers: headersResponse });
   }
 }
